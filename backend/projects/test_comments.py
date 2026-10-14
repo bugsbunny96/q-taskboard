@@ -105,3 +105,50 @@ class TestComments:
         with pytest.raises(PermissionError):
             comment.delete()
         assert Comment.objects.get(id=comment.id).body == "original"
+
+
+@pytest.mark.django_db
+class TestCommentsSurviveAsAuditTrail:
+    """Comments must not disappear indirectly, e.g. through cascading deletes."""
+
+    def test_deleting_a_task_with_comments_is_refused(self, task):
+        Comment.objects.create(task=task, author=task.created_by, body="keep me")
+        client = client_for(task, "member")
+        response = client.delete(f"/api/tasks/{task.id}")
+
+        assert response.status_code == 409
+        assert Task.objects.filter(id=task.id).exists()
+        assert Comment.objects.filter(task=task).count() == 1
+
+    def test_deleting_a_task_without_comments_still_works(self, task):
+        client = client_for(task, "member")
+        assert client.delete(f"/api/tasks/{task.id}").status_code == 200
+        assert not Task.objects.filter(id=task.id).exists()
+
+    def test_deleting_a_project_with_comments_is_refused(self, task):
+        Comment.objects.create(task=task, author=task.created_by, body="keep me")
+        client = client_for(task, "admin")
+        response = client.delete(f"/api/projects/{task.project_id}")
+
+        assert response.status_code == 409
+        assert Comment.objects.filter(task=task).count() == 1
+
+    def test_orm_cascade_cannot_remove_comments(self, task):
+        from django.db.models import ProtectedError
+
+        Comment.objects.create(task=task, author=task.created_by, body="keep me")
+        with pytest.raises(ProtectedError):
+            task.delete()
+        with pytest.raises(ProtectedError):
+            task.created_by.delete()  # the comment's author
+        assert Comment.objects.count() == 1
+
+    def test_database_rejects_bulk_update_and_delete(self, task):
+        from django.db import IntegrityError, transaction
+
+        Comment.objects.create(task=task, author=task.created_by, body="original")
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Comment.objects.all().update(body="tampered")
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Comment.objects.all().delete()
+        assert Comment.objects.get(task=task).body == "original"

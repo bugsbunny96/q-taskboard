@@ -63,15 +63,22 @@ class Task(models.Model):
 
 
 class Comment(models.Model):
-    """A comment on a task. Append-only: once written it is never edited or deleted
-    through the application (the API exposes only list + create, and save()/delete()
-    refuse to modify an existing row)."""
+    """A comment on a task. Append-only, because comments are part of the engagement
+    audit trail. Enforced in three layers:
+
+    1. API: only list + create endpoints exist (PUT/PATCH/DELETE -> 405).
+    2. ORM: save()/delete() refuse to touch an existing row, and the foreign keys are
+       PROTECT, so deleting a task, project or user that has comments raises instead
+       of silently cascading the comments away.
+    3. Database: a Postgres trigger (migration 0003) rejects UPDATE/DELETE on the
+       comments table, covering bulk queryset operations and raw SQL.
+    """
 
     MAX_LENGTH = 5000
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='comments')
-    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='comments')
+    task = models.ForeignKey(Task, on_delete=models.PROTECT, related_name='comments')
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='comments')
     body = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 

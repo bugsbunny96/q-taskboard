@@ -102,6 +102,11 @@ class ProjectDetailView(APIView):
             project = Project.objects.get(id=project_id)
         except Project.DoesNotExist:
             return Response({'error': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+        if Comment.objects.filter(task__project=project).exists():
+            return Response(
+                {'error': 'project has task comments, which are part of the audit trail and cannot be deleted'},
+                status=status.HTTP_409_CONFLICT,
+            )
         project.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -208,6 +213,11 @@ class TaskDetailView(APIView):
             return Response({'error': 'forbidden'}, status=status.HTTP_403_FORBIDDEN)
         if not _can_edit_tasks(membership.role):
             return Response({'error': 'viewers cannot delete tasks'}, status=status.HTTP_403_FORBIDDEN)
+        if task.comments.exists():
+            return Response(
+                {'error': 'task has comments, which are part of the audit trail and cannot be deleted'},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         task.delete()
         return Response({'ok': True})
