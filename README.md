@@ -150,7 +150,7 @@ docker-compose exec backend python manage.py seed
 - `DESIGN_NOTES.md` — decisions for Parts 2, 3a, 3b, 3c
 - `AI_USAGE.md` — how AI tools were used
 - `TERMINAL_LOG.md` — terminal session log
-- `RECORDING.md` — screen recording link
+- `RECORDING.md` — screen recording link: https://youtu.be/QSP9_KbvheA
 
 ## Tech Stack
 
