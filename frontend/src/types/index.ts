@@ -61,3 +61,20 @@ export type ApiComment = {
   createdAt: string;
   author: ApiUser;
 };
+
+export type ActivityVerb = "task_created" | "status_changed" | "assignee_changed" | "comment_added";
+
+export type ApiActivity = {
+  id: string;
+  verb: ActivityVerb;
+  taskId: string | null;
+  taskTitle: string;
+  data: {
+    status?: string;
+    from?: string | { id: string; name: string } | null;
+    to?: string | { id: string; name: string } | null;
+    commentId?: string;
+  };
+  createdAt: string;
+  actor: ApiUser;
+};

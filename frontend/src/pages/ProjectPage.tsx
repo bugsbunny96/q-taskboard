@@ -5,6 +5,7 @@ import { apiFetch, getStoredUser, getToken } from "@/lib/api-client";
 import { Header } from "@/components/Header";
 import { StatusColumn } from "@/components/StatusColumn";
 import { TaskDetail } from "@/components/TaskDetail";
+import { ActivityFeed } from "@/components/ActivityFeed";
 import type { ApiExportResult, ApiProjectDetail, ApiTask, TaskStatus } from "@/types";
 import { STATUS_ORDER } from "@/types";
 
@@ -36,6 +37,7 @@ export default function ProjectPage() {
     onSuccess: () => {
       setNewTitle("");
       queryClient.invalidateQueries({ queryKey: ["project", id] });
+      queryClient.invalidateQueries({ queryKey: ["activity", id] });
     },
     onError: (err) => setError(err instanceof Error ? err.message : "create failed"),
   });
@@ -184,6 +186,8 @@ export default function ProjectPage() {
                 />
               ))}
             </div>
+
+            <ActivityFeed projectId={id!} />
 
             <section className="mt-10">
               <h2 className="text-sm font-medium mb-3">members</h2>

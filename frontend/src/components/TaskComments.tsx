@@ -27,6 +27,7 @@ export function TaskComments({ taskId, canComment }: Props) {
     onSuccess: () => {
       setBody("");
       queryClient.invalidateQueries({ queryKey: ["comments", taskId] });
+      queryClient.invalidateQueries({ queryKey: ["activity"] });
     },
     onError: (err) => setError(err instanceof Error ? err.message : "comment failed"),
   });

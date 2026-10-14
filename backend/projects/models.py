@@ -94,3 +94,39 @@ class Comment(models.Model):
 
     def delete(self, *args, **kwargs):
         raise PermissionError('comments are append-only and cannot be deleted')
+
+
+class Activity(models.Model):
+    """Audit record of a meaningful change in a project, shown in the project's feed.
+
+    Written in the same database transaction as the change it describes (see
+    DESIGN_NOTES.md): if the activity row cannot be written, the change rolls back.
+
+    ``task`` is SET_NULL and ``task_title`` is a snapshot, so the history of a task
+    survives the task being deleted. Rows are never edited through the API.
+    """
+
+    TASK_CREATED = 'task_created'
+    STATUS_CHANGED = 'status_changed'
+    ASSIGNEE_CHANGED = 'assignee_changed'
+    COMMENT_ADDED = 'comment_added'
+    VERB_CHOICES = [
+        (TASK_CREATED, 'Task created'),
+        (STATUS_CHANGED, 'Status changed'),
+        (ASSIGNEE_CHANGED, 'Assignee changed'),
+        (COMMENT_ADDED, 'Comment added'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='activities')
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='activities')
+    verb = models.CharField(max_length=32, choices=VERB_CHOICES)
+    task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True, related_name='activities')
+    task_title = models.CharField(max_length=500)
+    data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'activities'
+        ordering = ['-created_at', '-id']
+        indexes = [models.Index(fields=['project', '-created_at'], name='activity_project_created_idx')]

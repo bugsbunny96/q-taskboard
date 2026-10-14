@@ -17,7 +17,9 @@ export function TaskDetail({ task, projectId, members, onClose }: Props) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
   const [status, setStatus] = useState<TaskStatus>(task.status);
-  const [assigneeId, setAssigneeId] = useState<string>(task.assigneeId ?? "");
+  // The API serialises the FK as `assignee_id`, not `assigneeId`, so fall back to the
+  // nested assignee object; otherwise every save would silently unassign the task.
+  const [assigneeId, setAssigneeId] = useState<string>(task.assigneeId ?? task.assignee?.id ?? "");
   const [error, setError] = useState<string | null>(null);
   const myRole = members.find((m) => m.user.id === getStoredUser()?.id)?.role;
   const canComment = myRole === "admin" || myRole === "member";
@@ -30,6 +32,7 @@ export function TaskDetail({ task, projectId, members, onClose }: Props) {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["activity", projectId] });
       onClose();
     },
     onError: (err) => setError(err instanceof Error ? err.message : "save failed"),

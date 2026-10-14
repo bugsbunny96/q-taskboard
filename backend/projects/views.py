@@ -3,11 +3,11 @@ import logging
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from django.db import connection
+from django.db import connection, transaction
 from users.serializers import UserSerializer
-from .models import Comment, Project, Membership, Task
+from .models import Activity, Comment, Project, Membership, Task
 from .serializers import ProjectDetailSerializer, TaskSerializer
-from . import airtable_export
+from . import activity, airtable_export
 
 logger = logging.getLogger(__name__)
 
@@ -158,15 +158,18 @@ class TaskListCreateView(APIView):
         last = Task.objects.filter(project_id=project_id, status=task_status).order_by('-position').first()
         position = (last.position + 1) if last else 0
 
-        task = Task.objects.create(
-            project_id=project_id,
-            title=title,
-            description=request.data.get('description') or None,
-            status=task_status,
-            assignee_id=request.data.get('assigneeId') or None,
-            created_by=request.user,
-            position=position,
-        )
+        # The task and its audit record commit together or not at all (DESIGN_NOTES.md).
+        with transaction.atomic():
+            task = Task.objects.create(
+                project_id=project_id,
+                title=title,
+                description=request.data.get('description') or None,
+                status=task_status,
+                assignee_id=request.data.get('assigneeId') or None,
+                created_by=request.user,
+                position=position,
+            )
+            activity.record_task_created(request.user, task)
         task_data = TaskSerializer(Task.objects.select_related('assignee').get(id=task.id)).data
         return Response({'task': task_data}, status=status.HTTP_201_CREATED)
 
@@ -186,6 +189,10 @@ class TaskDetailView(APIView):
         if not _can_edit_tasks(membership.role):
             return Response({'error': 'viewers cannot update tasks'}, status=status.HTTP_403_FORBIDDEN)
 
+        old_status = task.status
+        old_assignee_id = task.assignee_id
+        old_assignee = task.assignee
+
         if 'title' in request.data:
             task.title = request.data['title'].strip()
         if 'description' in request.data:
@@ -197,7 +204,15 @@ class TaskDetailView(APIView):
             task.status = new_status
         if 'assigneeId' in request.data:
             task.assignee_id = request.data['assigneeId'] or None
-        task.save()
+
+        # The update and its audit records commit together or not at all (DESIGN_NOTES.md).
+        with transaction.atomic():
+            task.save()
+            if task.status != old_status:
+                activity.record_status_changed(request.user, task, old_status, task.status)
+            if str(task.assignee_id or '') != str(old_assignee_id or ''):
+                new_assignee = Task.objects.select_related('assignee').get(id=task.id).assignee
+                activity.record_assignee_changed(request.user, task, old_assignee, new_assignee)
 
         task_data = TaskSerializer(Task.objects.select_related('assignee').get(id=task_id)).data
         return Response({'task': task_data})
@@ -338,5 +353,44 @@ class TaskCommentListCreateView(APIView):
             return Response({'error': f'body must be at most {Comment.MAX_LENGTH} characters'},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        comment = Comment.objects.create(task=task, author=request.user, body=body)
+        with transaction.atomic():
+            comment = Comment.objects.create(task=task, author=request.user, body=body)
+            activity.record_comment_added(request.user, task, comment)
         return Response({'comment': _comment_json(comment)}, status=status.HTTP_201_CREATED)
+
+
+def _activity_json(a):
+    return {
+        'id': str(a.id),
+        'verb': a.verb,
+        'taskId': str(a.task_id) if a.task_id else None,
+        'taskTitle': a.task_title,
+        'data': a.data,
+        'createdAt': a.created_at.isoformat(),
+        'actor': UserSerializer(a.actor).data,
+    }
+
+
+class ProjectActivityView(APIView):
+    """GET /api/projects/:id/activity?limit=50 - newest first, any project member (incl. viewers)."""
+
+    DEFAULT_LIMIT = 50
+    MAX_LIMIT = 200
+
+    def get(self, request, project_id):
+        membership = _get_membership(request.user, project_id)
+        if not membership:
+            return Response({'error': 'forbidden'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            limit = int(request.query_params.get('limit', self.DEFAULT_LIMIT))
+        except ValueError:
+            return Response({'error': 'limit must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+        limit = max(1, min(limit, self.MAX_LIMIT))
+
+        items = (
+            Activity.objects
+            .filter(project_id=project_id)
+            .select_related('actor')
+            .order_by('-created_at', '-id')[:limit]
+        )
+        return Response({'activity': [_activity_json(a) for a in items]})
