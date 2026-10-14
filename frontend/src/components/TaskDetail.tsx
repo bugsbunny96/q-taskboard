@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api-client";
+import { apiFetch, getStoredUser } from "@/lib/api-client";
+import { TaskComments } from "@/components/TaskComments";
 import type { ApiTask, ApiProjectMember, TaskStatus } from "@/types";
 import { STATUS_LABELS, STATUS_ORDER } from "@/types";
 
@@ -18,6 +19,8 @@ export function TaskDetail({ task, projectId, members, onClose }: Props) {
   const [status, setStatus] = useState<TaskStatus>(task.status);
   const [assigneeId, setAssigneeId] = useState<string>(task.assigneeId ?? "");
   const [error, setError] = useState<string | null>(null);
+  const myRole = members.find((m) => m.user.id === getStoredUser()?.id)?.role;
+  const canComment = myRole === "admin" || myRole === "member";
 
   const updateTask = useMutation({
     mutationFn: (input: Partial<ApiTask>) =>
@@ -151,6 +154,8 @@ export function TaskDetail({ task, projectId, members, onClose }: Props) {
             </button>
           </div>
         </div>
+
+        <TaskComments taskId={task.id} canComment={canComment} />
       </div>
     </div>
   );

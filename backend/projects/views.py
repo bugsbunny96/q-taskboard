@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.db import connection
 from users.serializers import UserSerializer
-from .models import Project, Membership, Task
+from .models import Comment, Project, Membership, Task
 from .serializers import ProjectDetailSerializer, TaskSerializer
 from . import airtable_export
 
@@ -280,3 +280,53 @@ class ExportView(APIView):
                             status=status.HTTP_502_BAD_GATEWAY)
 
         return Response(result.as_dict())
+
+
+def _comment_json(comment):
+    return {
+        'id': str(comment.id),
+        'taskId': str(comment.task_id),
+        'body': comment.body,
+        'createdAt': comment.created_at.isoformat(),
+        'author': UserSerializer(comment.author).data,
+    }
+
+
+class TaskCommentListCreateView(APIView):
+    """GET/POST /api/tasks/:id/comments.
+
+    Any project member (including viewers) can read; only admins and members can post.
+    There is deliberately no PATCH/PUT/DELETE handler, so DRF answers 405 - comments
+    are append-only. Non-members get 404 rather than 403 so task ids don't leak.
+    """
+
+    def _task_and_membership(self, request, task_id):
+        task = Task.objects.filter(id=task_id).first()
+        if not task:
+            return None, None
+        return task, _get_membership(request.user, str(task.project_id))
+
+    def get(self, request, task_id):
+        task, membership = self._task_and_membership(request, task_id)
+        if not task or not membership:
+            return Response({'error': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+        comments = Comment.objects.filter(task=task).select_related('author').order_by('created_at', 'id')
+        return Response({'comments': [_comment_json(c) for c in comments]})
+
+    def post(self, request, task_id):
+        task, membership = self._task_and_membership(request, task_id)
+        if not task or not membership:
+            return Response({'error': 'not found'}, status=status.HTTP_404_NOT_FOUND)
+        if not _can_edit_tasks(membership.role):
+            return Response({'error': 'viewers cannot comment'}, status=status.HTTP_403_FORBIDDEN)
+
+        body = request.data.get('body')
+        body = body.strip() if isinstance(body, str) else ''
+        if not body:
+            return Response({'error': 'body is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(body) > Comment.MAX_LENGTH:
+            return Response({'error': f'body must be at most {Comment.MAX_LENGTH} characters'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        comment = Comment.objects.create(task=task, author=request.user, body=body)
+        return Response({'comment': _comment_json(comment)}, status=status.HTTP_201_CREATED)

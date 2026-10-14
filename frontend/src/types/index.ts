@@ -53,3 +53,11 @@ export type ApiExportResult = {
   exported: number;
   failed: { taskId: string; title: string | null; error: string }[];
 };
+
+export type ApiComment = {
+  id: string;
+  taskId: string;
+  body: string;
+  createdAt: string;
+  author: ApiUser;
+};
