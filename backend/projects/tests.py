@@ -97,3 +97,44 @@ class TestTasks:
 
         response = client.delete(f'/api/tasks/{task.id}')
         assert response.status_code == 403
+
+
+@pytest.mark.django_db
+class TestTaskUpdatePermissions:
+    """Regression tests for PATCH /api/tasks/:id authorization."""
+
+    def _setup(self, user, role):
+        owner = User.objects.create_user(email='owner@example.com', name='Owner', password='password123')
+        project = Project.objects.create(name='P', owner=owner)
+        Membership.objects.create(user=owner, project=project, role='admin')
+        if role:
+            Membership.objects.create(user=user, project=project, role=role)
+        return Task.objects.create(project=project, title='Original', created_by=owner)
+
+    def _login(self, client):
+        resp = client.post('/api/auth/login', {'email': 'meera@taskboard.dev', 'password': 'password123'}, format='json')
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['token']}")
+
+    def test_viewer_cannot_update_task(self, client, user):
+        task = self._setup(user, 'viewer')
+        self._login(client)
+        response = client.patch(f'/api/tasks/{task.id}', {'title': 'Hacked'}, format='json')
+        assert response.status_code == 403
+        task.refresh_from_db()
+        assert task.title == 'Original'
+
+    def test_non_member_cannot_update_task(self, client, user):
+        task = self._setup(user, None)
+        self._login(client)
+        response = client.patch(f'/api/tasks/{task.id}', {'status': 'done'}, format='json')
+        assert response.status_code == 403
+        task.refresh_from_db()
+        assert task.status == 'todo'
+
+    def test_member_can_update_task(self, client, user):
+        task = self._setup(user, 'member')
+        self._login(client)
+        response = client.patch(f'/api/tasks/{task.id}', {'title': 'Updated', 'status': 'in_progress'}, format='json')
+        assert response.status_code == 200
+        assert response.data['task']['title'] == 'Updated'
+        assert response.data['task']['status'] == 'in_progress'
