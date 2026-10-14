@@ -107,11 +107,19 @@ curl -H "Authorization: Bearer <token>" http://localhost:8000/api/projects
 ### Tasks
 - `GET /api/projects/:id/tasks` — List tasks in a project; supports `?q=` search (authenticated)
 - `POST /api/projects/:id/tasks` — Create a task (admin or member)
-- `PATCH /api/tasks/:id` — Update a task (authenticated)
-- `DELETE /api/tasks/:id` — Delete a task (admin or member)
+- `PATCH /api/tasks/:id` — Update a task (admin or member)
+- `DELETE /api/tasks/:id` — Delete a task (admin or member; `409` if the task has comments)
+
+### Comments (Part 3a)
+- `GET /api/tasks/:id/comments` — Chronological comments with author, body, time (any project member)
+- `POST /api/tasks/:id/comments` — Add a comment `{"body": "..."}` (admin or member; viewers `403`)
+- Comments are append-only: no edit/delete endpoints (`405`), and the database rejects UPDATE/DELETE
+
+### Activity (Part 3b)
+- `GET /api/projects/:id/activity?limit=50` — Newest-first audit feed: task created, status changed, assignee changed, comment added (any project member)
 
 ### Export
-- `POST /api/projects/:id/export` — Export tasks to Airtable (admin or member)
+- `POST /api/projects/:id/export` — Upsert all project tasks into Airtable (admin or member). Returns `{total, exported, failed}`; safe to re-run
 
 ## Airtable Export (Part 3c)
 
@@ -124,6 +132,25 @@ AIRTABLE_TABLE_NAME=Tasks
 ```
 
 The backend uses `pyairtable` for real API calls. `backend/projects/airtable_mock.py` is a test double — use it in unit tests, not in production code.
+
+The Airtable table needs these fields: `Task ID` (primary, single line text), `Title`, `Description` (long text), `Status`, `Assignee`, `Position` (number), `Project`. See `DESIGN_NOTES.md` for retry/idempotency behaviour.
+
+## Resetting the dev database
+
+Comments are an append-only audit trail, so `seed` cannot wipe a database that already has comments. To reset on purpose:
+
+```bash
+docker-compose exec backend python manage.py reset_audit_trail --yes   # irreversibly erases comments
+docker-compose exec backend python manage.py seed
+```
+
+## Submission docs
+
+- `REVIEW.md` — code review (Part 1)
+- `DESIGN_NOTES.md` — decisions for Parts 2, 3a, 3b, 3c
+- `AI_USAGE.md` — how AI tools were used
+- `TERMINAL_LOG.md` — terminal session log
+- `RECORDING.md` — screen recording link
 
 ## Tech Stack
 
