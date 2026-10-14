@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -5,6 +7,9 @@ from django.db import connection
 from users.serializers import UserSerializer
 from .models import Project, Membership, Task
 from .serializers import ProjectDetailSerializer, TaskSerializer
+from . import airtable_export
+
+logger = logging.getLogger(__name__)
 
 
 def _get_membership(user, project_id):
@@ -240,6 +245,13 @@ class MemberAddView(APIView):
 
 
 class ExportView(APIView):
+    """POST /api/projects/:id/export - upsert every task of the project into Airtable.
+
+    Safe to re-run: rows are keyed on "Task ID", so a second run updates instead of
+    duplicating. Per-record failures are reported in ``failed`` (HTTP 200); only a
+    configuration/auth problem that makes the whole export impossible is an error.
+    """
+
     def post(self, request, project_id):
         membership = _get_membership(request.user, project_id)
         if not membership:
@@ -247,5 +259,24 @@ class ExportView(APIView):
         if not _can_edit_tasks(membership.role):
             return Response({'error': 'only admins and members can export'}, status=status.HTTP_403_FORBIDDEN)
 
-        tasks = Task.objects.filter(project_id=project_id).select_related('assignee', 'created_by')
-        return Response({'exported': 0, 'tasks': TaskSerializer(tasks, many=True).data})
+        try:
+            table = airtable_export.get_table()
+        except airtable_export.AirtableNotConfigured as exc:
+            logger.error('airtable export unavailable: %s', exc)
+            return Response({'error': 'airtable export is not configured'},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        tasks = (
+            Task.objects
+            .filter(project_id=project_id)
+            .select_related('assignee', 'project')
+            .order_by('status', 'position')
+        )
+        try:
+            result = airtable_export.export_tasks(tasks, table)
+        except airtable_export.AirtableFatalError as exc:
+            logger.error('airtable export aborted: %s', exc)
+            return Response({'error': f'airtable rejected the export: {exc}'},
+                            status=status.HTTP_502_BAD_GATEWAY)
+
+        return Response(result.as_dict())

@@ -47,3 +47,9 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
 };
 
 export const STATUS_ORDER: TaskStatus[] = ["todo", "in_progress", "review", "done"];
+
+export type ApiExportResult = {
+  total: number;
+  exported: number;
+  failed: { taskId: string; title: string | null; error: string }[];
+};
